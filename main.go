@@ -142,7 +142,9 @@ func getMeetingById(w http.ResponseWriter, r *http.Request) {
 	defer client.Disconnect(ctx)
 	meetingsDatabase := client.Database("meetingsAPI")
 	meetingCollection := meetingsDatabase.Collection("meeting")
-	id, _ := primitive.ObjectIDFromHex("5f8bc9b4454ae1e32b9d4500")
+	query := r.URL.Query()
+	filters := query["id"]
+	id, _ := primitive.ObjectIDFromHex(filters[0])
 	cursor, err := meetingCollection.Find(ctx, bson.M{"_id": id})
 	if err != nil {
 		log.Fatal(err)
@@ -200,11 +202,12 @@ func getMeetingByParticipant(w http.ResponseWriter, r *http.Request) {
 	defer client.Disconnect(ctx)
 	meetingsDatabase := client.Database("meetingsAPI")
 	meetingCollection := meetingsDatabase.Collection("meeting")
-	cursor, err := meetingCollection.Find(ctx, (bson.M{"participants": bson.M{"$elemMatch": bson.M{"name": "Pratik"}}}))
-	// meetingCollection.Find(ctx, bson.M{"brands.items":{
-	// 	$elemMatch:{"origin":"Italy",price:{ $gte:500 }
-	// 	}
-	//  }})
+
+	query := r.URL.Query()
+	filters := query["participant"]
+
+	cursor, err := meetingCollection.Find(ctx, (bson.M{"participants": bson.M{"$elemMatch": bson.M{"email": filters[0]}}}))
+
 	if err != nil {
 		log.Fatal(err)
 	}
