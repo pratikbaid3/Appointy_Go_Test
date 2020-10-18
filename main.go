@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"log"
 	"net/http"
+	"strings"
 	"time"
 
 	"go.mongodb.org/mongo-driver/bson"
@@ -14,21 +15,109 @@ import (
 	"go.mongodb.org/mongo-driver/mongo/options"
 )
 
-//Meeting Schema
-// Id
-// Title
-// Participants
-// Start Time
-// End Time
-// Creation Timestamp
+type Person struct {
+	Name  string `json:"name"`
+	Email string `json:"email"`
+	RSVP  string `json:"rsvp"`
+}
 
-//Person Schema
-// Name
-// Email
-// RSVP (i.e. Yes/No/MayBe/Not Answered)
+type Meeting struct {
+	Title        string `json:"title"`
+	Participants Person `json:"participants"`
+	StartTime    string `json:"startTime"`
+	EndTime      string `json:"endTime"`
+}
 
-func homePage(w http.ResponseWriter, r *http.Request) {
-	fmt.Fprintf(w, "Home Page")
+func meetings(w http.ResponseWriter, r *http.Request) {
+	switch r.Method {
+	case "POST":
+		addNewMeeting(w, r)
+	case "GET":
+		participant, ok := r.URL.Query()["participant"]
+		if !ok || len(participant[0]) < 1 {
+			log.Println("Url Param 'timeFrame' is present")
+			getMeetingByTimeFrame(w, r)
+		} else {
+			log.Println("Url Param 'participant' is present")
+			getMeetingByParticipant(w, r)
+		}
+
+	}
+}
+
+func getMeetingByTimeFrame(w http.ResponseWriter, r *http.Request) {
+	layout := "2006-01-02T15:04:05"
+	client, err := mongo.NewClient(options.Client().ApplyURI("mongodb://localhost:27017/?readPreference=primary&appname=MongoDB%20Compass&ssl=false"))
+	if err != nil {
+		log.Fatal(err)
+	}
+	ctx, _ := context.WithTimeout(context.Background(), 10*time.Second)
+	err = client.Connect(ctx)
+	if err != nil {
+		log.Fatal(err)
+	}
+	defer client.Disconnect(ctx)
+	meetingsDatabase := client.Database("meetingsAPI")
+	meetingCollection := meetingsDatabase.Collection("meeting")
+
+	start := r.URL.Query()["start"]
+	end := r.URL.Query()["end"]
+
+	fromDate, err := time.Parse(layout, start[0])
+	toDate, err := time.Parse(layout, end[0])
+	log.Println(fromDate)
+	log.Println(toDate)
+	if err != nil {
+		fmt.Println(err)
+	}
+
+	cursor, err := meetingCollection.Find(ctx, bson.M{
+		"creationTime": bson.M{
+			"$gt": fromDate,
+			"$lt": toDate,
+		},
+	})
+	if err != nil {
+		log.Fatal(err)
+	}
+	var episodes []bson.M
+	if err = cursor.All(ctx, &episodes); err != nil {
+		log.Fatal(err)
+	}
+	fmt.Println(episodes)
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(episodes)
+}
+
+func getMeetingByParticipant(w http.ResponseWriter, r *http.Request) {
+	client, err := mongo.NewClient(options.Client().ApplyURI("mongodb://localhost:27017/?readPreference=primary&appname=MongoDB%20Compass&ssl=false"))
+	if err != nil {
+		log.Fatal(err)
+	}
+	ctx, _ := context.WithTimeout(context.Background(), 10*time.Second)
+	err = client.Connect(ctx)
+	if err != nil {
+		log.Fatal(err)
+	}
+	defer client.Disconnect(ctx)
+	meetingsDatabase := client.Database("meetingsAPI")
+	meetingCollection := meetingsDatabase.Collection("meeting")
+
+	query := r.URL.Query()
+	filters := query["participant"]
+
+	cursor, err := meetingCollection.Find(ctx, (bson.M{"participants": bson.M{"$elemMatch": bson.M{"email": filters[0]}}}))
+
+	if err != nil {
+		log.Fatal(err)
+	}
+	var episodes []bson.M
+	if err = cursor.All(ctx, &episodes); err != nil {
+		log.Fatal(err)
+	}
+	fmt.Println(episodes)
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(episodes)
 }
 
 func addNewMeeting(w http.ResponseWriter, r *http.Request) {
@@ -67,84 +156,8 @@ func addNewMeeting(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		log.Fatal(err)
 	}
-	json.NewEncoder(w).Encode(meetingResult)
-}
 
-func addParticipantToMeeting(w http.ResponseWriter, r *http.Request) {
-	client, err := mongo.NewClient(options.Client().ApplyURI("mongodb://localhost:27017/?readPreference=primary&appname=MongoDB%20Compass&ssl=false"))
-	if err != nil {
-		log.Fatal(err)
-	}
-	ctx, _ := context.WithTimeout(context.Background(), 10*time.Second)
-	err = client.Connect(ctx)
-	if err != nil {
-		log.Fatal(err)
-	}
-	defer client.Disconnect(ctx)
-	meetingsDatabase := client.Database("meetingsAPI")
-	meetingCollection := meetingsDatabase.Collection("meeting")
-	id, _ := primitive.ObjectIDFromHex("5f8bc9b4454ae1e32b9d4500")
-	result, err := meetingCollection.UpdateOne(
-		ctx,
-		bson.M{"_id": id},
-		bson.D{
-			{"$push", bson.D{{"participants",
-				bson.D{
-					{"name", "Tejas"},
-					{"email", "tejasbaid3@gmail.com"},
-					{"RSVP", "YES"},
-				},
-			}}},
-		},
-	)
-	if err != nil {
-		log.Fatal(err)
-	}
-	fmt.Printf("Updated %v Documents!\n", result.ModifiedCount)
-	json.NewEncoder(w).Encode(result)
-}
-
-func getAllMeeting(w http.ResponseWriter, r *http.Request) {
-	client, err := mongo.NewClient(options.Client().ApplyURI("mongodb://localhost:27017/?readPreference=primary&appname=MongoDB%20Compass&ssl=false"))
-	if err != nil {
-		log.Fatal(err)
-	}
-	ctx, _ := context.WithTimeout(context.Background(), 10*time.Second)
-	err = client.Connect(ctx)
-	if err != nil {
-		log.Fatal(err)
-	}
-	defer client.Disconnect(ctx)
-	meetingsDatabase := client.Database("meetingsAPI")
-	meetingCollection := meetingsDatabase.Collection("meeting")
-	cursor, err := meetingCollection.Find(ctx, bson.M{})
-	if err != nil {
-		log.Fatal(err)
-	}
-	var episodes []bson.M
-	if err = cursor.All(ctx, &episodes); err != nil {
-		log.Fatal(err)
-	}
-	fmt.Println(episodes)
-	json.NewEncoder(w).Encode(episodes)
-}
-
-func getMeetingById(w http.ResponseWriter, r *http.Request) {
-	client, err := mongo.NewClient(options.Client().ApplyURI("mongodb://localhost:27017/?readPreference=primary&appname=MongoDB%20Compass&ssl=false"))
-	if err != nil {
-		log.Fatal(err)
-	}
-	ctx, _ := context.WithTimeout(context.Background(), 10*time.Second)
-	err = client.Connect(ctx)
-	if err != nil {
-		log.Fatal(err)
-	}
-	defer client.Disconnect(ctx)
-	meetingsDatabase := client.Database("meetingsAPI")
-	meetingCollection := meetingsDatabase.Collection("meeting")
-	query := r.URL.Query()
-	filters := query["id"]
-	id, _ := primitive.ObjectIDFromHex(filters[0])
+	id := meetingResult.InsertedID
 	cursor, err := meetingCollection.Find(ctx, bson.M{"_id": id})
 	if err != nil {
 		log.Fatal(err)
@@ -154,10 +167,13 @@ func getMeetingById(w http.ResponseWriter, r *http.Request) {
 		log.Fatal(err)
 	}
 	fmt.Println(episodes)
+	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(episodes)
 }
 
-func getMeetingByTimeFrame(w http.ResponseWriter, r *http.Request) {
+func getMeetingByID(w http.ResponseWriter, r *http.Request) {
+	res1 := strings.Split(r.URL.Path, "/")
+	docId := res1[2]
 	client, err := mongo.NewClient(options.Client().ApplyURI("mongodb://localhost:27017/?readPreference=primary&appname=MongoDB%20Compass&ssl=false"))
 	if err != nil {
 		log.Fatal(err)
@@ -170,14 +186,8 @@ func getMeetingByTimeFrame(w http.ResponseWriter, r *http.Request) {
 	defer client.Disconnect(ctx)
 	meetingsDatabase := client.Database("meetingsAPI")
 	meetingCollection := meetingsDatabase.Collection("meeting")
-	fromDate := time.Date(2014, time.November, 4, 0, 0, 0, 0, time.UTC)
-	toDate := time.Date(2014, time.November, 5, 0, 0, 0, 0, time.UTC)
-	cursor, err := meetingCollection.Find(ctx, bson.M{
-		"creationTime": bson.M{
-			"$gt": fromDate,
-			"$lt": toDate,
-		},
-	})
+	id, _ := primitive.ObjectIDFromHex(docId)
+	cursor, err := meetingCollection.Find(ctx, bson.M{"_id": id})
 	if err != nil {
 		log.Fatal(err)
 	}
@@ -186,59 +196,16 @@ func getMeetingByTimeFrame(w http.ResponseWriter, r *http.Request) {
 		log.Fatal(err)
 	}
 	fmt.Println(episodes)
-	json.NewEncoder(w).Encode(episodes)
-}
-
-func getMeetingByParticipant(w http.ResponseWriter, r *http.Request) {
-	client, err := mongo.NewClient(options.Client().ApplyURI("mongodb://localhost:27017/?readPreference=primary&appname=MongoDB%20Compass&ssl=false"))
-	if err != nil {
-		log.Fatal(err)
-	}
-	ctx, _ := context.WithTimeout(context.Background(), 10*time.Second)
-	err = client.Connect(ctx)
-	if err != nil {
-		log.Fatal(err)
-	}
-	defer client.Disconnect(ctx)
-	meetingsDatabase := client.Database("meetingsAPI")
-	meetingCollection := meetingsDatabase.Collection("meeting")
-
-	query := r.URL.Query()
-	filters := query["participant"]
-
-	cursor, err := meetingCollection.Find(ctx, (bson.M{"participants": bson.M{"$elemMatch": bson.M{"email": filters[0]}}}))
-
-	if err != nil {
-		log.Fatal(err)
-	}
-	var episodes []bson.M
-	if err = cursor.All(ctx, &episodes); err != nil {
-		log.Fatal(err)
-	}
-	fmt.Println(episodes)
+	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(episodes)
 }
 
 func handleRequest() {
-	http.HandleFunc("/meeting", addNewMeeting)
-	http.HandleFunc("/addParticipant", addParticipantToMeeting)
-	http.HandleFunc("/getMeetings", getAllMeeting)
-	http.HandleFunc("/getMeetingById", getMeetingById)
-	http.HandleFunc("/getMeetingByTimeFrame", getMeetingByTimeFrame)
-	http.HandleFunc("/getMeetingByParticipants", getMeetingByParticipant)
+	http.HandleFunc("/meeting/", getMeetingByID)
+	http.HandleFunc("/meetings", meetings)
 	log.Fatal(http.ListenAndServe(":8081", nil))
 }
 
 func main() {
-	client, err := mongo.NewClient(options.Client().ApplyURI("mongodb://localhost:27017/?readPreference=primary&appname=MongoDB%20Compass&ssl=false"))
-	if err != nil {
-		log.Fatal(err)
-	}
-	ctx, _ := context.WithTimeout(context.Background(), 10*time.Second)
-	err = client.Connect(ctx)
-	if err != nil {
-		log.Fatal(err)
-	}
-	defer client.Disconnect(ctx)
 	handleRequest()
 }
