@@ -129,10 +129,37 @@ func getAllMeeting(w http.ResponseWriter, r *http.Request) {
 	json.NewEncoder(w).Encode(episodes)
 }
 
+func getMeetingById(w http.ResponseWriter, r *http.Request) {
+	client, err := mongo.NewClient(options.Client().ApplyURI("mongodb://localhost:27017/?readPreference=primary&appname=MongoDB%20Compass&ssl=false"))
+	if err != nil {
+		log.Fatal(err)
+	}
+	ctx, _ := context.WithTimeout(context.Background(), 10*time.Second)
+	err = client.Connect(ctx)
+	if err != nil {
+		log.Fatal(err)
+	}
+	defer client.Disconnect(ctx)
+	meetingsDatabase := client.Database("meetingsAPI")
+	meetingCollection := meetingsDatabase.Collection("meeting")
+	id, _ := primitive.ObjectIDFromHex("5f8bc9b4454ae1e32b9d4500")
+	cursor, err := meetingCollection.Find(ctx, bson.M{"_id": id})
+	if err != nil {
+		log.Fatal(err)
+	}
+	var episodes []bson.M
+	if err = cursor.All(ctx, &episodes); err != nil {
+		log.Fatal(err)
+	}
+	fmt.Println(episodes)
+	json.NewEncoder(w).Encode(episodes)
+}
+
 func handleRequest() {
 	http.HandleFunc("/meeting", addNewMeeting)
 	http.HandleFunc("/addParticipant", addParticipantToMeeting)
 	http.HandleFunc("/getMeetings", getAllMeeting)
+	http.HandleFunc("/getMeetingById", getMeetingById)
 	log.Fatal(http.ListenAndServe(":8081", nil))
 }
 
