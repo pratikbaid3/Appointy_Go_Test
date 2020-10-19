@@ -15,17 +15,18 @@ import (
 	"go.mongodb.org/mongo-driver/mongo/options"
 )
 
-type Person struct {
-	Name  string `json:"name"`
-	Email string `json:"email"`
-	RSVP  string `json:"rsvp"`
+type Participant struct {
+	Name  string
+	Email string
+	RSVP  string
 }
 
 type Meeting struct {
-	Title        string `json:"title"`
-	Participants Person `json:"participants"`
-	StartTime    string `json:"startTime"`
-	EndTime      string `json:"endTime"`
+	Title        string
+	Participants []Participant
+	StartTime    time.Time
+	EndTime      time.Time
+	CreationTime time.Time
 }
 
 func meetings(w http.ResponseWriter, r *http.Request) {
@@ -72,7 +73,7 @@ func getMeetingByTimeFrame(w http.ResponseWriter, r *http.Request) {
 	}
 
 	cursor, err := meetingCollection.Find(ctx, bson.M{
-		"creationTime": bson.M{
+		"creationtime": bson.M{
 			"$gt": fromDate,
 			"$lt": toDate,
 		},
@@ -133,42 +134,54 @@ func addNewMeeting(w http.ResponseWriter, r *http.Request) {
 	defer client.Disconnect(ctx)
 	meetingsDatabase := client.Database("meetingsAPI")
 	meetingCollection := meetingsDatabase.Collection("meeting")
-	meetingResult, err := meetingCollection.InsertOne(ctx,
-		bson.D{
-			{"title", "Test"},
-			{"participants", bson.A{
-				bson.D{
-					{"name", "Pratik"},
-					{"email", "pratikbaid3@gmail.com"},
-					{"RSVP", "YES"},
-				},
-				bson.D{
-					{"name", "Tejas"},
-					{"email", "tejas@gmail.com"},
-					{"RSVP", "NO"},
-				},
-			}},
-			{"startTime", "10:30"},
-			{"endTime", "12:30"},
-			{"creationTime", time.Now()},
-		},
-	)
-	if err != nil {
-		log.Fatal(err)
+
+	var meeting Meeting
+	json.NewDecoder(r.Body).Decode(&meeting)
+	meeting.CreationTime = time.Now()
+	w.Header().Set("Content-Type", "application/json")
+
+	//Check if the participant is in any other meeting with RSVP yes
+	isParticipantClashing := false
+	for _, participant := range meeting.Participants {
+		if participant.RSVP == "YES" {
+			var meetingCheck Meeting
+			if err = meetingCollection.FindOne(ctx, bson.M{"starttime": bson.D{{"$lte", meeting.StartTime}}, "endtime": bson.D{{"$gt", meeting.StartTime}}, "participants.email": participant.Email, "participants.rsvp": "YES"}).Decode(&meetingCheck); err != nil {
+				if err = meetingCollection.FindOne(ctx, bson.M{"starttime": bson.D{{"$lt", meeting.EndTime}}, "endtime": bson.D{{"$gte", meeting.EndTime}}, "participants.email": participant.Email, "participants.rsvp": "YES"}).Decode(&meetingCheck); err != nil {
+					if err = meetingCollection.FindOne(ctx, bson.M{"starttime": bson.D{{"$gte", meeting.StartTime}}, "endtime": bson.D{{"$lte", meeting.EndTime}}, "participants.email": participant.Email, "participants.rsvp": "YES"}).Decode(&meetingCheck); err != nil {
+						isParticipantClashing = false
+					} else {
+						isParticipantClashing = true
+					}
+				} else {
+					isParticipantClashing = true
+				}
+			} else {
+				isParticipantClashing = true
+			}
+		}
+	}
+	if isParticipantClashing {
+		w.WriteHeader(http.StatusForbidden)
+		json.NewEncoder(w).Encode("Participant is already RSVP'd YES for another meeting in the same time frame")
+	} else {
+		meetingResult, err := meetingCollection.InsertOne(ctx, meeting)
+		if err != nil {
+			log.Fatal(err)
+		}
+
+		id := meetingResult.InsertedID
+		cursor, err := meetingCollection.Find(ctx, bson.M{"_id": id})
+		if err != nil {
+			log.Fatal(err)
+		}
+		var episodes []bson.M
+		if err = cursor.All(ctx, &episodes); err != nil {
+			log.Fatal(err)
+		}
+		fmt.Println(episodes)
+		json.NewEncoder(w).Encode(episodes)
 	}
 
-	id := meetingResult.InsertedID
-	cursor, err := meetingCollection.Find(ctx, bson.M{"_id": id})
-	if err != nil {
-		log.Fatal(err)
-	}
-	var episodes []bson.M
-	if err = cursor.All(ctx, &episodes); err != nil {
-		log.Fatal(err)
-	}
-	fmt.Println(episodes)
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(episodes)
 }
 
 func getMeetingByID(w http.ResponseWriter, r *http.Request) {
